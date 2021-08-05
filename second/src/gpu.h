@@ -13,8 +13,11 @@
 
 // __global__ 
 // void ProcessInGpu(int* data, uint sizeX, uint sizeY);
-__global__
-void ProcessInGpu(thrust::device_vector<int>& data, uint sizeX, uint sizeY);
+namespace CudaKernelFunctions {
+    __global__
+    void ProcessInGpu(int* data, uint sizeX, uint sizeY);
+} // CudaKernelFunctions
+
 
 class CudaWrapper {
 public:

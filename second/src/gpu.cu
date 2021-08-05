@@ -1,7 +1,7 @@
 #include "gpu.h"
 
 __global__ 
-void ProcessInGpu(int* data, uint sizeX, uint sizeY)
+void CudaKernelFunctions::ProcessInGpu(int* data, uint sizeX, uint sizeY)
 {
     int x = threadIdx.x;
     int y = blockIdx.x;
@@ -48,7 +48,7 @@ void CudaWrapper::Run()
     
     thrust::device_vector<int> gpuImageData(sizeX_ * sizeY_ * 3, 0);
     int* gpuImgPtr = thrust::raw_pointer_cast(gpuImageData.data());
-    ProcessInGpu<<<grid_, thread_>>>(gpuImgPtr, sizeX_, sizeY_);
+    CudaKernelFunctions::ProcessInGpu<<<grid_, thread_>>>(gpuImgPtr, sizeX_, sizeY_);
     gpuImgPtr = nullptr;
     free(gpuImgPtr);
     // int* hostImageData = (int*)malloc(sizeX_ * sizeY_ * 3 * sizeof(int));
