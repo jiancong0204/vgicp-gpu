@@ -1,9 +1,11 @@
 #include <iostream>
+
 #include "gpu.h"
 
 void printCudaVersion()
 {
-    std::cout << "CUDA Compiled version: " << __CUDACC_VER_MAJOR__ << "." << __CUDACC_VER_MINOR__ << "." << __CUDACC_VER_BUILD__ << std::endl;
+    std::cout << "CUDA Compiled version: " << __CUDACC_VER_MAJOR__ << "." << __CUDACC_VER_MINOR__ << "."
+              << __CUDACC_VER_BUILD__ << std::endl;
 
     int runtime_ver;
     cudaRuntimeGetVersion(&runtime_ver);
@@ -13,5 +15,3 @@ void printCudaVersion()
     cudaDriverGetVersion(&driver_ver);
     std::cout << "CUDA Driver version: " << driver_ver << std::endl;
 }
-
-__global__ ProcessInGpu() 
