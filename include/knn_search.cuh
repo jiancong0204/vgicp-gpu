@@ -1,44 +1,52 @@
-#ifndef FIRST_INCLUDE_KNN_SEARCH_H
-#define FIRST_INCLUDE_KNN_SEARCH_H
+#ifndef INCLUDE_KNN_SEARCH_CUH
+#define INCLUDE_KNN_SEARCH_CUH
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
+#include <thrust/execution_policy.h>
+#include <thrust/for_each.h>
+#include <thrust/host_vector.h>
+#include <thrust/sequence.h>
+#include <thrust/sort.h>
 
 #include <Eigen/Core>
 
-namespace KnnSearch {
+namespace FastGicp {
 namespace {
-
 struct SortingKernel {
+public:
     SortingKernel(int k, thrust::device_vector<thrust::pair<double, int>>& kNeighbors);
-    __host__ __device__ void operator()(int idx) const;
+    __host__ __device__ void operator()(const int idx) const;
 
+private:
     const int k_;
-    thrust::device_ptr<thrust::pair<double, int>> kNeighbors_;
+    thrust::device_ptr<thrust::pair<double, int>> kNeighborsPtr_;
 };
 
 struct NeighborSearchKernel {
-    NeighborSearchKernel(int k, const thrust::device_vector<Eigen::Vector3f>& target,
-        thrust::device_vector<thrust::pair<double, int>>& k_neighbors);
+public:
+    NeighborSearchKernel(int k, const thrust::device_vector<Eigen::Vector3d>& target,
+        thrust::device_vector<thrust::pair<double, int>>& kNeighbors);
     template <typename Tuple> __host__ __device__ void operator()(const Tuple& idx_x) const;
 
-    const int k;
-    const int num_target_points;
-    thrust::device_ptr<const Eigen::Vector3f> target_points_ptr;
-
-    thrust::device_ptr<thrust::pair<double, int>> k_neighbors_ptr;
+private:
+    const int k_;
+    const int numTargetPts_;
+    thrust::device_ptr<const Eigen::Vector3d> targetConstPtsPtr_;
+    thrust::device_ptr<thrust::pair<double, int>> kNeighborsPtr_;
 };
-
 } // namespace
 
 class KnnSearch {
 public:
     KnnSearch() = default;
     ~KnnSearch() = default;
-    void Test();
+    void SearchNeighbors(const thrust::device_vector<Eigen::Vector3d>& srcPts,
+        const thrust::device_vector<Eigen::Vector3d>& tarPts, const int k, const bool doSort,
+        thrust::device_vector<thrust::pair<double, int>>& kNeighbors);
 };
-} // namespace KnnSearch
+} // namespace FastGicp
 
-#endif // FIRST_INCLUDE_KNN_SEARCH_H
+#endif // INCLUDE_KNN_SEARCH_CUH

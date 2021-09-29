@@ -1,100 +1,80 @@
-#include <thrust/execution_policy.h>
-#include <thrust/for_each.h>
-#include <thrust/host_vector.h>
-#include <thrust/sort.h>
-
 #include <random>
 
 #include "knn_search.cuh"
 
-KnnSearch::SortingKernel::SortingKernel(int k, thrust::device_vector<thrust::pair<double, int>>& kNeighbors)
-    : k_(k), kNeighbors_(kNeighbors.data())
+FastGicp::SortingKernel::SortingKernel(int k, thrust::device_vector<thrust::pair<double, int>>& kNeighbors)
+    : k_(k), kNeighborsPtr_(kNeighbors.data())
 {
 }
 
-__host__ __device__ void KnnSearch::SortingKernel::operator()(int idx) const
+__host__ __device__ void FastGicp::SortingKernel::operator()(int idx) const
 {
-    thrust::device_ptr<thrust::pair<double, int>> neighbors2Sort = kNeighbors_ + idx * k_;
+    thrust::device_ptr<thrust::pair<double, int>> neighbors2SortPtr = kNeighborsPtr_ + idx * k_;
 
     struct Cmp {
         __host__ __device__ bool operator()(const thrust::pair<double, int>& lhs, const thrust::pair<double, int>& rhs)
         {
-            return lhs.first < rhs.first; // Sort so that distances are increasing.
+            return lhs.first < rhs.first; // Sort elements in the ascending order
         }
     };
 
-    thrust::sort(thrust::device, neighbors2Sort, neighbors2Sort + k_, Cmp());
+    thrust::sort(thrust::device, neighbors2SortPtr, neighbors2SortPtr + k_, Cmp());
 }
 
-KnnSearch::NeighborSearchKernel::NeighborSearchKernel(int k, const thrust::device_vector<Eigen::Vector3f>& target,
-    thrust::device_vector<thrust::pair<double, int>>& k_neighbors)
-    : k(k), num_target_points(target.size()), target_points_ptr(target.data()), k_neighbors_ptr(k_neighbors.data())
+FastGicp::NeighborSearchKernel::NeighborSearchKernel(int k, const thrust::device_vector<Eigen::Vector3d>& target,
+    thrust::device_vector<thrust::pair<double, int>>& kNeighbors)
+    : k_(k), numTargetPts_(target.size()), targetConstPtsPtr_(target.data()), kNeighborsPtr_(kNeighbors.data())
 {
 }
 
-template <typename Tuple> __host__ __device__ void KnnSearch::NeighborSearchKernel::operator()(const Tuple& idx_x) const
+template <typename Tuple>
+__host__ __device__ void FastGicp::NeighborSearchKernel::operator()(const Tuple& indexedPts) const
 {
     // threadIdx doesn't work because thrust split for_each in two loops
-    int idx = thrust::get<0>(idx_x);
-    const Eigen::Vector3f& x = thrust::get<1>(idx_x);
+    int idx = thrust::get<0>(indexedPts);
+    const Eigen::Vector3d& pt = thrust::get<1>(indexedPts);
 
-    // target points buffer & nn output buffer
-    const Eigen::Vector3f* pts = thrust::raw_pointer_cast(target_points_ptr);
-    thrust::pair<double, int>* k_neighbors = thrust::raw_pointer_cast(k_neighbors_ptr) + idx * k;
+    const Eigen::Vector3d* const tarPts = thrust::raw_pointer_cast(targetConstPtsPtr_);
+    thrust::pair<double, int>* kNeighbors = thrust::raw_pointer_cast(kNeighborsPtr_) + idx * k_;
 
-    struct compare_type {
-        bool operator()(const thrust::pair<double, int>& lhs, const thrust::pair<double, int>& rhs)
+    struct Cmp {
+        __host__ __device__ bool operator()(const thrust::pair<double, int>& lhs, const thrust::pair<double, int>& rhs)
         {
-            return lhs.first < rhs.first;
+            return lhs.first < rhs.first; // Sort elements in the ascending order
         }
     };
 
-    for (int i = 0; i < k; i++) {
-        double sq_dist = (pts[i] - x).squaredNorm();
-        k_neighbors[i] = thrust::make_pair(sq_dist, i);
+    for (int i = 0; i < k_; i++) {
+        double sqDist = (tarPts[i] - pt).squaredNorm();
+        kNeighbors[i] = thrust::make_pair(sqDist, i);
     }
-    thrust::sort(k_neighbors, k_neighbors + k - 1, compare_type());
+    thrust::sort(thrust::device, kNeighbors, kNeighbors + k_, Cmp());
 
-    for (int i = k; i < num_target_points; i++) {
-        double sq_dist = (pts[i] - x).squaredNorm();
-        if (sq_dist < k_neighbors[k - 1].first) {
-            k_neighbors[k - 1] = thrust::make_pair(sq_dist, i);
-            thrust::sort(k_neighbors, k_neighbors + k - 1, compare_type());
+    for (int i = k_; i < numTargetPts_; i++) {
+        double sqDist = (tarPts[i] - pt).squaredNorm();
+
+        // 1: k-1 to locate the last element
+        if (sqDist < kNeighbors[k_ - 1].first) {
+            kNeighbors[k_ - 1] = thrust::make_pair(sqDist, i);
+            thrust::sort(thrust::device, kNeighbors, kNeighbors + k_, Cmp());
         }
     }
 }
 
-void KnnSearch::KnnSearch::Test()
+void FastGicp::KnnSearch::SearchNeighbors(const thrust::device_vector<Eigen::Vector3d>& srcPts,
+    const thrust::device_vector<Eigen::Vector3d>& tarPts, const int k, const bool doSort,
+    thrust::device_vector<thrust::pair<double, int>>& kNeighbors)
 {
-    thrust::host_vector<thrust::pair<double, int>> hVec;
-    std::default_random_engine randomEngine;
-    std::uniform_real_distribution<double> dist(0, 10.0);
+    thrust::device_vector<int> dIndices(srcPts.size());
+    thrust::sequence(dIndices.begin(), dIndices.end());
 
-    for (int i = 0; i < 100; ++i) {
-        auto val = dist(randomEngine);
-        hVec.push_back(thrust::make_pair(val, i));
-    }
+    auto first = thrust::make_zip_iterator(thrust::make_tuple(dIndices.begin(), srcPts.begin()));
+    auto last = thrust::make_zip_iterator(thrust::make_tuple(dIndices.end(), srcPts.end()));
 
-    for (int i = 0; i < 100; ++i) {
-        auto p = static_cast<thrust::pair<double, int>>(hVec[i]);
-        std::cout << i << " " << p.first << " " << p.second << std::endl;
-    }
-    thrust::device_vector<thrust::pair<double, int>> dVec(hVec);
+    kNeighbors.resize(srcPts.size() * k, thrust::make_pair(-1.0f, -1));
+    thrust::for_each(first, last, NeighborSearchKernel(k, tarPts, kNeighbors));
 
-    thrust::device_vector<int> dIdx(10);
-    thrust::sequence(dIdx.begin(), dIdx.end());
-
-    thrust::for_each(thrust::device, dIdx.begin(), dIdx.end(), SortingKernel(10, dVec));
-    cudaDeviceSynchronize();
-
-    // thrust::device_ptr<thrust::pair<double, int>> k_neighbors_ptr(dVec.data());
-    // for (auto idx : dIdx) {
-    //     thrust::device_ptr<thrust::pair<double, int>> k_neighbors = k_neighbors_ptr + 10 * idx;
-    //     thrust::sort(k_neighbors, k_neighbors + 10);
-    // }
-
-    for (int i = 0; i < 100; ++i) {
-        auto p = static_cast<thrust::pair<double, int>>(dVec[i]);
-        std::cout << i << " " << p.first << " " << p.second << std::endl;
+    if (doSort) {
+        thrust::for_each(dIndices.begin(), dIndices.end(), SortingKernel(k, kNeighbors));
     }
 }
