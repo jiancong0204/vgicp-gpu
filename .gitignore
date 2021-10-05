@@ -1,3 +1,7 @@
 */build/*
 */.vscode/*
 */.idea/*
+
+/.vscode/*
+/build/*
+/.idea/*
